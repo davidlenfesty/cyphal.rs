@@ -1,11 +1,9 @@
-//! Full std::collections based SessionManager implementation.
+//! Alloc-based transfer manager. Intended for embedded applications with a specialized allocation implementation.
 //!
-//! This is intended to be the lowest-friction interface to get
-//! started, both for library development and eventually for using the library.
 
 use embedded_time::Clock;
 
-use crate::session::*;
+use crate::transfer::*;
 use crate::types::NodeId;
 use crate::transfer::RefTransfer;
 

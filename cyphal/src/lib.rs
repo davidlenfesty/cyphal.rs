@@ -23,7 +23,6 @@
 //! environments, but I'll get to those when I get to them.
 #![no_std]
 #![deny(warnings)]
-#![feature(generic_associated_types)]
 #![feature(test)]
 
 #[allow(unused_imports)]
@@ -41,7 +40,7 @@ extern crate alloc;
 
 pub mod time;
 
-mod crc16;
+//mod crc16;
 pub mod transfer;
 pub mod transport;
 pub mod types;
@@ -52,9 +51,7 @@ pub use transfer::TransferKind;
 
 pub use streaming_iterator::StreamingIterator;
 
-mod internal;
 mod node;
-pub mod session;
 
 use types::*;
 
@@ -74,10 +71,9 @@ pub enum RxError {
     NewSessionNoStart,
     /// Session has expired
     Timeout,
-    /// Frame is part of new
-    InvalidTransferId,
-    /// Internal SessionManager error
-    SessionError(session::SessionError),
+
+    /// Transport implementation has incorrectly assigned a remote node id to a message
+    MessageWithRemoteId,
 }
 
 /// Errors that can be caused by incorrect parameters for transmission
@@ -110,6 +106,8 @@ pub enum Priority {
 }
 
 /// Simple subscription type to
+// TODO remove this allow
+#[allow(dead_code)]
 pub struct Subscription {
     transfer_kind: TransferKind,
     port_id: PortId,

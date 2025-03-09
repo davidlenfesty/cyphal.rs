@@ -10,78 +10,147 @@ use core::marker::PhantomData;
 
 use core::clone::Clone;
 
-use crate::session::SessionManager;
-use crate::transfer::{Transfer, RefTransfer};
+use crate::transfer::manager::{CreateTransferError, UpdateTransferError, TokenAccessError};
+use crate::transfer::TransferManager;
 use crate::transport::Transport;
-use crate::types::*;
-use crate::{RxError, TxError};
+use crate::{types::*, RxError, TransferKind, TxError};
 
 /// Node implementation. Generic across session managers and transport types.
 #[derive(Debug)]
-pub struct Node<S: SessionManager<C>, T: Transport<C>, C: embedded_time::Clock> {
+pub struct Node<M: TransferManager<C>, C: embedded_time::Clock> {
     id: Option<NodeId>,
 
     /// Session manager. Made public so it could be managed by implementation.
     ///
     /// Instead of being public, could be placed behind a `with_session_manager` fn
     /// which took a closure. I can't decide which API is better.
-    pub sessions: S,
+    pub transfer_manager: M,
 
-    /// Transport type
-    transport: PhantomData<T>,
     _clock: PhantomData<C>,
 }
 
-impl<'a, S, T, C> Node<S, T, C>
+pub enum TransmitFrameError {
+    TokenError(TokenAccessError),
+    TxError(TxError),
+    /// This indicates an error with the transfer manager implementation,
+    /// when there is no access erro but the callback has not been called
+    InvalidHandling,
+}
+
+impl<'a, M, C> Node<M, C>
 where
-    T: Transport<C>,
-    S: SessionManager<C>,
+    M: TransferManager<C>,
     C: embedded_time::Clock + Clone,
 {
-    pub fn new(id: Option<NodeId>, session_manager: S) -> Self {
+    pub fn new(id: Option<NodeId>, session_manager: M) -> Self {
         Self {
             id,
-            sessions: session_manager,
-            transport: PhantomData,
+            transfer_manager: session_manager,
             _clock: PhantomData,
         }
     }
 
-    // Convenience function to access session manager inside of a closure.
-    // I was going to use this because I was thinking I needed a closure
-    // to access the session manager safely, but that isn't really the case.
-    //
-    // It still has potential to be useful (i.e. if you're using this with
-    // an unsafe storage mechanism, the below form will prevent you from
-    // taking references of the session manager), but idk if it actually is.
-    //fn with_session_manager<R>(&mut self, f: fn(&mut T) -> R) -> R {
-    //    f(&mut self.sessions)
-    //}
+    pub fn try_receive_frame<T: Transport<C>>(self: &mut Self, frame: &T::Frame) -> Result<Option<M::RxTransferToken>, RxError> {
+        let frame = T::rx_process_frame(frame)?;
 
-    /// Attempts to receive frame. Returns error when frame is invalid, Some(Transfer) at the end of
-    /// a transfer, and None if we haven't finished the transfer.
-    pub fn try_receive_frame(&mut self, frame: T::Frame) -> Result<Option<RefTransfer<C>>, RxError> {
-        let frame = T::rx_process_frame(&self.id, &frame)?;
-
-        if let Some(frame) = frame {
-            match self.sessions.ingest(frame) {
-                Ok(frame) => Ok(frame),
-                Err(err) => Err(RxError::SessionError(err)),
+        // Check if a message is for us
+        if let Some(node_id) = frame.metadata.remote_node_id {
+            match frame.metadata.transfer_kind {
+                TransferKind::Message => {
+                    return Err(RxError::MessageWithRemoteId);
+                }
+                TransferKind::Request | TransferKind::Response => {
+                    match self.id {
+                        Some(id) => {
+                            if node_id != id {
+                                // Targeted message, but not for us
+                                return Ok(None);
+                            }
+                        }
+                        None => {
+                            // Targeted message, but we are anonymous
+                            return Ok(None);
+                        }
+                    }
+                }
             }
-        } else {
-            Ok(None)
+        }
+
+        // TODO check subscriptions
+
+        match self.transfer_manager.append_frame(&frame, T::is_valid_next_index, T::update_crc) {
+            Ok(tok) => Ok(tok),
+            Err(UpdateTransferError::NoSpace) => {
+                // TODO should I handle this error explicitly? yes
+                Ok(None)
+            }
+            Err(UpdateTransferError::DoesNotExist) => {
+                if !frame.first_frame {
+                    return Err(RxError::NewSessionNoStart);
+                }
+
+                match self.transfer_manager.new_transfer(&frame) {
+                    Ok(tok) => Ok(tok),
+                    Err(CreateTransferError::AlreadyExists) => {
+                        // This is theoretically unreachable
+                        // TODO handle error
+                        Ok(None)
+                    }
+                    Err(CreateTransferError::NoSpace) => {
+                        // TODO handle error
+                        Ok(None)
+                    }
+                }
+            }
         }
     }
 
-    // Create a series of frames to transmit.
-    // I think there could be 3 versions of this:
-    // 1. Returns a collection of frames to transmit.
-    // 2. Pushes frame onto queue, similar to libcanard.
-    // 3. Returns an iterator into a series of frames.
-    //
-    // 1 and 3 provide the user with more options but also make it harder
-    // to implement for the user.
-    pub fn transmit<X: Transfer<'a, C>>(&self, transfer: &'a X) -> Result<T::FrameIter<'a>, TxError> {
-        T::transmit(transfer)
+    // TODO users may want a variant of this function that preserves the token
+    // so they can peek the transfer metadata for logging
+    /// Creates a new frame for the provided transport to provide.
+    pub fn transmit_frame<T: Transport<C>>(
+        &mut self,
+        token: M::TxTransferToken,
+        // TODO node should hold a clock instance
+        timestamp: embedded_time::Instant<C>,
+    ) -> Result<(T::Frame, Option<M::TxTransferToken>), TransmitFrameError> {
+
+        let mut frame_out = Err(TransmitFrameError::InvalidHandling);
+        let res = M::transmit(&mut self.transfer_manager, token, |metadata, data| {
+            let frame = T::transmit_frame(metadata, data, self.id, timestamp);
+            match frame {
+                Ok((frame, consumed)) => {
+                    frame_out = Ok(frame);
+                    consumed
+                }
+
+                Err(e) => {
+                    frame_out = Err(TransmitFrameError::TxError(e));
+                    0
+                }
+            }
+        });
+
+        match res {
+            Ok(token) => {
+                match frame_out {
+                    Ok(frame) => Ok((frame, token)),
+                    // Some TxError occurred, so we can't continue sending things,
+                    // clean up.
+                    Err(TransmitFrameError::TxError(e)) => {
+                        if let Some(token) = token {
+                            // Dropping any returned error here, the token should be correct
+                            // from the fact we got a transmit error
+                            let _ = self.transfer_manager.cancel_tx_transfer(token);
+                        }
+                        Err(TransmitFrameError::TxError(e))
+                    }
+                    // Generic error, just return it and move on
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(TransmitFrameError::TokenError(e)),
+        }
+
     }
 }
