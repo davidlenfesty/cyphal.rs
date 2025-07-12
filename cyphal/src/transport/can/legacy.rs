@@ -14,6 +14,8 @@ use crate::transfer::{Frame, TransferMetadata};
 use crate::transport::Transport;
 use crate::{NodeId, Priority, RxError, TransferKind, TxError};
 
+use crc_any::CRCu16;
+
 /// Unit struct for declaring transport type
 #[derive(Copy, Clone, Debug)]
 pub struct Can;
@@ -38,15 +40,14 @@ impl Default for TxMetadata {
 }
 
 pub struct RxMetadata {
-    crc: u16,
+    crc: CRCu16,
     toggle_bit: bool,
 }
 
 impl Default for RxMetadata {
     fn default() -> Self {
         return Self {
-            // TODO valid?
-            crc: 0,
+            crc: CRCu16::crc16ccitt_false(),
 
             // Invert initial toggle bit, so when we check the first frame it works if it's set
             toggle_bit: false,
@@ -80,14 +81,22 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
 
         // update metadata
         transport_metadata.toggle_bit = frame_metadata.toggle_bit;
+        transport_metadata.crc.digest(frame.payload);
 
-        // TODO CRC
-
-        todo!();
+        Ok(())
     }
 
     fn process_tx_crc(buffer: &mut [u8], data_size: usize) -> usize {
-        todo!()
+        let mut crc = CRCu16::crc16ccitt_false();
+        crc.digest(&buffer[0..data_size]);
+
+        // Append CRC
+        // TODO endianness may be wrong
+        let crc = crc.get_crc();
+        buffer[data_size] = (crc & 0x00FF) as u8;
+        buffer[data_size + 1] = (crc & 0xFF00 >> 8) as u8;
+
+        data_size + 2
     }
 
     fn rx_process_frame<'a>(
