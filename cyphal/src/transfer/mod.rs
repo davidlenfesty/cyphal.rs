@@ -74,10 +74,6 @@ pub struct Frame<'a, C: embedded_time::Clock> {
     pub payload: &'a [u8],
 
     // TODO how to enable out of order re-assembly?
-    // TODO also CAN needs to carry state inside of an individual transfer...
     pub first_frame: bool,
     pub last_frame: bool,
-
-    // TODO this shouldn't be here
-    pub toggle_bit: bool,
 }

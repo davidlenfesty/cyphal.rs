@@ -1,18 +1,20 @@
-use num_traits::real;
-
 use crate::{transport::Transport, types::NodeId};
 
 use super::{
+    Frame, TransferMetadata,
     manager::{
         CreateTransferError, InternalOrUserError, TokenAccessError, TransferManager,
-        UpdateTransferError,
+        UpdateTransferError, timestamp_expired,
     },
-    Frame, TransferMetadata,
 };
 
-use core::hash;
 use std::vec::Vec;
 use std::{collections::HashMap, hash::DefaultHasher, hash::Hash, hash::Hasher};
+
+enum TransferStatus<D> {
+    Active(D),
+    TimedOut,
+}
 
 struct RxTransfer<C: embedded_time::Clock, T: Transport<C>> {
     transfer_metadata: TransferMetadata<C>,
@@ -28,9 +30,8 @@ struct TxTransfer<C: embedded_time::Clock, T: Transport<C>> {
 }
 
 pub struct MapTransferManager<C: embedded_time::Clock, T: Transport<C>> {
-    rx_transfers: HashMap<RxToken, RxTransfer<C, T>>,
-
-    tx_transfers: HashMap<TxToken, TxTransfer<C, T>>,
+    rx_transfers: HashMap<RxToken, TransferStatus<RxTransfer<C, T>>>,
+    tx_transfers: HashMap<TxToken, TransferStatus<TxTransfer<C, T>>>,
 }
 
 #[derive(Eq, PartialEq, Hash)]
@@ -52,11 +53,15 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
     fn append_frame(
         &mut self,
         frame: &Frame<C>,
+        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, UpdateTransferError> {
         let token = RxToken(hash_metadata(&frame.metadata));
 
         match self.rx_transfers.get_mut(&token) {
-            Some(rx_transfer) => {
+            Some(TransferStatus::TimedOut) => Err(UpdateTransferError::TimedOut),
+            Some(TransferStatus::Active(rx_transfer)) => {
+                T::update_rx_metadata(&mut rx_transfer.transport_metadata, metadata, frame);
+
                 rx_transfer.payload.extend_from_slice(frame.payload);
 
                 if frame.last_frame {
@@ -73,6 +78,8 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
+        // TODO maybe not necessary?
+        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError> {
         let token = RxToken(hash_metadata(&frame.metadata));
 
@@ -82,11 +89,11 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
 
         self.rx_transfers.insert(
             token,
-            RxTransfer {
+            TransferStatus::Active(RxTransfer {
                 transfer_metadata: frame.metadata.clone(),
                 transport_metadata: T::RxMetadata::default(),
                 payload: Vec::from(frame.payload),
-            },
+            }),
         );
 
         if frame.last_frame {
@@ -101,11 +108,14 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         token: Self::RxTransferToken,
         cb: impl FnOnce(&super::TransferMetadata<C>, &[u8]),
     ) -> Result<(), TokenAccessError> {
-        if let Some(transfer) = self.rx_transfers.get(&token) {
-            cb(&transfer.transfer_metadata, &transfer.payload);
+        match self.rx_transfers.get(&token) {
+            Some(TransferStatus::TimedOut) => Err(TokenAccessError::TransferTimeout),
+            Some(TransferStatus::Active(transfer)) => {
+                cb(&transfer.transfer_metadata, &transfer.payload);
+                Ok(())
+            }
+            None => Err(TokenAccessError::InvalidToken),
         }
-
-        Ok(())
     }
 
     fn cancel_rx_transfer(&mut self, token: Self::RxTransferToken) -> Result<(), TokenAccessError> {
@@ -156,12 +166,12 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
 
                 let _ = self.tx_transfers.insert(
                     token,
-                    TxTransfer {
+                    TransferStatus::Active(TxTransfer {
                         transfer_metadata: metadata.clone(),
                         transport_metadata: T::TxMetadata::default(),
                         consumed: 0usize,
                         payload: buf,
-                    },
+                    }),
                 );
 
                 Ok(token)
@@ -181,6 +191,11 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
             .get_mut(&token)
             .ok_or(TokenAccessError::InvalidToken)?;
 
+        let transfer = match transfer {
+            TransferStatus::Active(transfer) => transfer,
+            TransferStatus::TimedOut => return Err(TokenAccessError::TransferTimeout),
+        };
+
         let consumed = cb(
             &transfer.transfer_metadata,
             &mut transfer.transport_metadata,
@@ -197,7 +212,43 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         }
     }
 
-    fn update_transfers(&mut self, timestamp: crate::time::Timestamp<C>) {
-        todo!()
+    fn update_transfers(
+        &mut self,
+        timestamp: crate::time::Timestamp<C>,
+        timeout: crate::time::Duration,
+    ) {
+        for (_token, transfer) in self.tx_transfers.iter_mut() {
+            let expired = if let TransferStatus::Active(transfer) = transfer {
+                // TODO why Some here?
+                timestamp_expired(
+                    timeout,
+                    timestamp,
+                    Some(transfer.transfer_metadata.timestamp),
+                )
+            } else {
+                false
+            };
+
+            if expired {
+                *transfer = TransferStatus::TimedOut;
+            }
+        }
+
+        for (_token, transfer) in self.rx_transfers.iter_mut() {
+            let expired = if let TransferStatus::Active(transfer) = transfer {
+                // TODO why Some here?
+                timestamp_expired(
+                    timeout,
+                    timestamp,
+                    Some(transfer.transfer_metadata.timestamp),
+                )
+            } else {
+                false
+            };
+
+            if expired {
+                *transfer = TransferStatus::TimedOut;
+            }
+        }
     }
 }

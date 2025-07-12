@@ -8,8 +8,8 @@ use bitfield::bitfield;
 use embedded_hal::can::ExtendedId;
 use num_traits::ToPrimitive;
 
-use crate::types::*;
 use crate::Priority;
+use crate::types::*;
 
 bitfield! {
     /// Structure declaring bitfields of a message frame.

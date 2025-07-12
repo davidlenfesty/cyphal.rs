@@ -1,4 +1,5 @@
-use crate::time::Timestamp;
+use crate::RxError;
+use crate::time::{Duration, Timestamp};
 use crate::transfer::Frame;
 use crate::transport::Transport;
 
@@ -21,6 +22,10 @@ pub enum UpdateTransferError {
     NoSpace,
     /// The transfer does not exist
     DoesNotExist,
+    /// Transfer timed out since receiving the previous frame
+    TimedOut,
+    /// Error in handling reception of an existing transfer
+    RxError(RxError),
 }
 
 pub enum CreateTransferError {
@@ -65,6 +70,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     fn append_frame(
         &mut self,
         frame: &Frame<C>,
+        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, UpdateTransferError>;
 
     /// Create a new transfer from the incoming frame, optionally returning a transfer token if it's a single-frame
@@ -79,6 +85,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
+        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError>;
 
     /// Provides read access into the transfer payload to the user's calback, consuming the RX token.
@@ -129,7 +136,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     ///
     /// Note: an implementation is expected to also clean up complete transfers after some period,
     /// or it will be possible for the user to not clear out a transfer via usage.
-    fn update_transfers(&mut self, timestamp: Timestamp<C>);
+    fn update_transfers(&mut self, timestamp: Timestamp<C>, timeout: Duration);
 }
 
 pub fn timestamp_expired<C: embedded_time::Clock, D>(

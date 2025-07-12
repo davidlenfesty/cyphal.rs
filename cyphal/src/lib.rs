@@ -22,8 +22,7 @@
 //! this. I can see issues with this running into issues in multi-threaded
 //! environments, but I'll get to those when I get to them.
 #![no_std]
-#![deny(warnings)]
-#![feature(test)]
+//#![deny(warnings)]
 
 #[allow(unused_imports)]
 #[cfg(feature = "std")]

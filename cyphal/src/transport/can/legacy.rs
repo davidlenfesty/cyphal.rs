@@ -4,9 +4,6 @@
 //! the best practices, so if you want to add support for a new transport, you should
 //! follow the conventions here.
 
-use core::f32::consts::TAU;
-use core::ptr::metadata;
-
 use arrayvec::ArrayVec;
 use embedded_hal::can::ExtendedId;
 use num_traits::FromPrimitive;
@@ -20,6 +17,10 @@ use crate::{NodeId, Priority, RxError, TransferKind, TxError};
 /// Unit struct for declaring transport type
 #[derive(Copy, Clone, Debug)]
 pub struct Can;
+
+pub struct FrameMetadata {
+    pub toggle_bit: bool,
+}
 
 pub struct TxMetadata {
     first_frame: bool,
@@ -55,7 +56,7 @@ impl Default for RxMetadata {
 
 impl<C: embedded_time::Clock> Transport<C> for Can {
     type Frame = CanFrame<C>;
-
+    type FrameMetadata = FrameMetadata;
     type RxMetadata = RxMetadata;
     type TxMetadata = TxMetadata;
 
@@ -68,18 +69,17 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
     }
 
     fn update_rx_metadata(
-        metadata: &mut Self::RxMetadata,
+        transport_metadata: &mut Self::RxMetadata,
+        frame_metadata: Self::FrameMetadata,
         frame: &crate::transfer::Frame<C>,
     ) -> Result<(), RxError> {
         // Check for issues
-        if frame.toggle_bit == metadata.toggle_bit {
+        if frame_metadata.toggle_bit == transport_metadata.toggle_bit {
             return Err(RxError::InvalidFrameOrdering);
         }
 
         // update metadata
-        // TODO toggle bit should not live in transfer frame...
-        // TODO rx_process_frame should give us another intermediate object with the intermediate data
-        metadata.toggle_bit = frame.toggle_bit;
+        transport_metadata.toggle_bit = frame_metadata.toggle_bit;
 
         // TODO CRC
 
@@ -92,7 +92,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
 
     fn rx_process_frame<'a>(
         frame: &'a Self::Frame,
-    ) -> Result<crate::transfer::Frame<'a, C>, RxError> {
+    ) -> Result<(crate::transfer::Frame<'a, C>, Self::FrameMetadata), RxError> {
         // Frames cannot be empty. They must at least have a tail byte.
         // NOTE: libcanard specifies this as only for multi-frame transfers but uses
         // this logic.
@@ -112,6 +112,10 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
             return Err(RxError::NonLastUnderUtilization);
         }
 
+        let frame_metadata = FrameMetadata {
+            toggle_bit: tail_byte.toggle(),
+        };
+
         if CanServiceId(frame.id.as_raw()).is_svc() {
             // Handle services
             let id = CanServiceId(frame.id.as_raw());
@@ -127,21 +131,23 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                 TransferKind::Response
             };
 
-            return Ok(Frame {
-                metadata: TransferMetadata {
-                    timestamp: frame.timestamp,
-                    priority: Priority::from_u8(id.priority()).unwrap(),
-                    transfer_kind,
-                    port_id: id.service_id(),
-                    remote_node_id: Some(id.source_id()),
-                    transfer_id: tail_byte.transfer_id(),
-                },
+            return Ok((
+                Frame {
+                    metadata: TransferMetadata {
+                        timestamp: frame.timestamp,
+                        priority: Priority::from_u8(id.priority()).unwrap(),
+                        transfer_kind,
+                        port_id: id.service_id(),
+                        remote_node_id: Some(id.source_id()),
+                        transfer_id: tail_byte.transfer_id(),
+                    },
 
-                payload: &frame.payload[0..frame.payload.len() - 1],
-                first_frame: tail_byte.start_of_transfer(),
-                last_frame: tail_byte.end_of_transfer(),
-                toggle_bit: tail_byte.toggle(),
-            });
+                    payload: &frame.payload[0..frame.payload.len() - 1],
+                    first_frame: tail_byte.start_of_transfer(),
+                    last_frame: tail_byte.end_of_transfer(),
+                },
+                frame_metadata,
+            ));
         } else {
             // Handle messages
             let id = CanMessageId(frame.id.as_raw());
@@ -162,21 +168,23 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                 return Err(RxError::InvalidCanId);
             }
 
-            return Ok(Frame {
-                metadata: TransferMetadata {
-                    timestamp: frame.timestamp,
-                    priority: Priority::from_u8(id.priority()).unwrap(),
-                    transfer_kind: TransferKind::Message,
-                    port_id: id.subject_id(),
-                    remote_node_id: source_node_id,
-                    transfer_id: tail_byte.transfer_id(),
-                },
+            return Ok((
+                Frame {
+                    metadata: TransferMetadata {
+                        timestamp: frame.timestamp,
+                        priority: Priority::from_u8(id.priority()).unwrap(),
+                        transfer_kind: TransferKind::Message,
+                        port_id: id.subject_id(),
+                        remote_node_id: source_node_id,
+                        transfer_id: tail_byte.transfer_id(),
+                    },
 
-                payload: &frame.payload[0..frame.payload.len() - 1],
-                first_frame: tail_byte.start_of_transfer(),
-                last_frame: tail_byte.end_of_transfer(),
-                toggle_bit: tail_byte.toggle(),
-            });
+                    payload: &frame.payload[0..frame.payload.len() - 1],
+                    first_frame: tail_byte.start_of_transfer(),
+                    last_frame: tail_byte.end_of_transfer(),
+                },
+                frame_metadata,
+            ));
         }
     }
 

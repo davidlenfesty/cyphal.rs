@@ -9,18 +9,21 @@
 // Declaring all of the sub transport modules here.
 pub mod can;
 
-use crate::transfer::{Frame as TransferFrame, TransferMetadata};
 use crate::NodeId;
+use crate::transfer::{Frame as TransferFrame, TransferMetadata};
 use crate::{RxError, TxError};
 
 pub trait Transport<C: embedded_time::Clock> {
+    /// Core frame type, that can get received from the link layer.
     type Frame;
 
-    // Metadata stored for both transmission halves
-    type TxMetadata: Default;
-    type RxMetadata: Default;
+    /// Metadata produced by an incoming frame needed to match it up with ongoing transfers.
+    type FrameMetadata;
 
-    // TODO internal frame info before we know about an existing transfer
+    /// Metadata required to maintain an ongoing TX transfer
+    type TxMetadata: Default;
+    /// Metadata required to maintain an ongoing RX transfer
+    type RxMetadata: Default;
 
     const MTU_SIZE: usize;
 
@@ -31,7 +34,8 @@ pub trait Transport<C: embedded_time::Clock> {
 
     /// Update RX metadata for a newly received frame, and check for validity in transfer
     fn update_rx_metadata(
-        metadata: &mut Self::RxMetadata,
+        transport_metadata: &mut Self::RxMetadata,
+        frame_metadata: Self::FrameMetadata,
         frame: &TransferFrame<C>,
     ) -> Result<(), RxError>;
 
@@ -40,7 +44,7 @@ pub trait Transport<C: embedded_time::Clock> {
 
     fn rx_process_frame<'a>(
         frame: &'a Self::Frame,
-    ) -> Result<crate::transfer::Frame<'a, C>, RxError>;
+    ) -> Result<(crate::transfer::Frame<'a, C>, Self::FrameMetadata), RxError>;
 
     fn transmit_frame(
         transfer_metadata: &TransferMetadata<C>,

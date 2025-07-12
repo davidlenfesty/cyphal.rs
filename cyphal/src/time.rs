@@ -19,9 +19,9 @@ mod test_clock {
     use alloc::rc::Rc;
 
     use embedded_time::{
+        Clock, ConversionError, TimeInt,
         duration::{Duration, Microseconds, Milliseconds},
         fixed_point::FixedPoint,
-        Clock, ConversionError, TimeInt,
     };
 
     /// A Clock for test cases
@@ -210,8 +210,8 @@ mod std_clock {
     #[cfg(test)]
     mod test {
         use embedded_time::{
-            duration::{Duration, Microseconds},
             Clock,
+            duration::{Duration, Microseconds},
         };
         use mock_instant::MockClock;
 
