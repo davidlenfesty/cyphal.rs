@@ -105,6 +105,12 @@ where
         }
     }
 
+    // TODO implement
+    // This needs to take: data, metadata, timestamp
+    // Generally I think the API around starting a transfer needs a bit of thought
+    // TODO need to adjust API to handle appending CRC bytes to transfer data
+    pub fn start_tx_transfer<T: Transport<C>>() {}
+
     // TODO users may want a variant of this function that preserves the token
     // so they can peek the transfer metadata for logging
     /// Creates a new frame for the provided transport to provide.

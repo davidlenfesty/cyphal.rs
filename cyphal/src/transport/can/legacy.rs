@@ -4,6 +4,9 @@
 //! the best practices, so if you want to add support for a new transport, you should
 //! follow the conventions here.
 
+use core::f32::consts::TAU;
+use core::ptr::metadata;
+
 use arrayvec::ArrayVec;
 use embedded_hal::can::ExtendedId;
 use num_traits::FromPrimitive;
@@ -19,21 +22,71 @@ use crate::{NodeId, Priority, RxError, TransferKind, TxError};
 #[derive(Copy, Clone, Debug)]
 pub struct Can;
 
+pub struct TxMetadata {
+    first_frame: bool,
+    toggle_bit: bool,
+}
+
+impl Default for TxMetadata {
+    fn default() -> Self {
+        return Self {
+            first_frame: false,
+            // Protocol version states SOT must have toggle set
+            toggle_bit: true,
+        }
+    }
+}
+
+pub struct RxMetadata {
+    crc: u16,
+    toggle_bit: bool,
+}
+
+impl Default for RxMetadata {
+    fn default() -> Self {
+        return Self {
+            // TODO valid?
+            crc: 0,
+
+            // Invert initial toggle bit, so when we check the first frame it works if it's set
+            toggle_bit: false,
+        }
+    }
+}
+
 impl<C: embedded_time::Clock> Transport<C> for Can {
     type Frame = CanFrame<C>;
+
+    type RxMetadata = RxMetadata; 
+    type TxMetadata = TxMetadata;
+
 
     const MTU_SIZE: usize = 8;
     const CRC_SIZE: usize = 2;
 
-    fn is_valid_next_index(frame_idx: u32, transfer_idx: u32) -> bool {
-        let expected_toggle = (transfer_idx % 2) == 0;
-        return frame_idx == expected_toggle as u32;
+    fn get_crc_padded_size(requested_size: usize) -> usize {
+        // Just need to include CRC16
+        return requested_size + 2;
     }
 
-    // TODO CRC16-CCITT impl
-    fn update_crc(_current_crc: Option<u32>, _data: &[u8]) -> u32 {
-        // This will leave things as always valid until we actually implement CRC
-        return 0;
+    fn update_rx_metadata(metadata: &mut Self::RxMetadata, frame: &crate::transfer::Frame<C>) -> Result<(), RxError> {
+        // Check for issues
+        if frame.toggle_bit == metadata.toggle_bit {
+            return Err(RxError::InvalidFrameOrdering);
+        }
+
+        // update metadata
+        // TODO toggle bit should not live in transfer frame...
+        // TODO rx_process_frame should give us another intermediate object with the intermediate data
+        metadata.toggle_bit = frame.toggle_bit;
+
+        // TODO CRC
+
+        todo!();
+    }
+
+    fn process_tx_crc(buffer: &mut [u8], data_size: usize) -> usize {
+        todo!()
     }
 
     fn rx_process_frame<'a>(
@@ -81,13 +134,12 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                     port_id: id.service_id(),
                     remote_node_id: Some(id.source_id()),
                     transfer_id: tail_byte.transfer_id(),
-                    frame_id: tail_byte.toggle() as u32,
-                    crc: 0,
                 },
 
                 payload: &frame.payload[0..frame.payload.len() - 1],
                 first_frame: tail_byte.start_of_transfer(),
                 last_frame: tail_byte.end_of_transfer(),
+                toggle_bit: tail_byte.toggle(),
             });
         } else {
             // Handle messages
@@ -117,56 +169,59 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                     port_id: id.subject_id(),
                     remote_node_id: source_node_id,
                     transfer_id: tail_byte.transfer_id(),
-
-                    frame_id: tail_byte.toggle() as u32,
-                    // At this point in time, CRC does not mean anything
-                    // - a side effect of design
-                    crc: 0,
                 },
 
                 payload: &frame.payload[0..frame.payload.len() - 1],
                 first_frame: tail_byte.start_of_transfer(),
                 last_frame: tail_byte.end_of_transfer(),
+                toggle_bit: tail_byte.toggle(),
             });
         }
     }
 
 
     fn transmit_frame(
-            metadata: &TransferMetadata<C>,
+            transfer_metadata: &TransferMetadata<C>,
+            transport_metadata: &mut Self::TxMetadata,
             data: &[u8],
             node_id: Option<NodeId>,
             timestamp: embedded_time::Instant<C>,
         ) -> Result<(Self::Frame, usize), TxError>  {
-        let toggle_bit = metadata.frame_id % 2 == 0;
-        let first_frame = metadata.frame_id == 0;
         // CRC included in data, calculated when creating a TX transfer
+        let first_frame = transport_metadata.first_frame;
         let last_frame = data.len() <= 7;
+        let toggle_bit = transport_metadata.toggle_bit;
 
-        let frame_id = match metadata.transfer_kind {
+        // Update metadata
+        transport_metadata.first_frame = false;
+        transport_metadata.toggle_bit = !toggle_bit;
+
+        // Build CAN ID from transfer metadata
+        let frame_id = match transfer_metadata.transfer_kind {
             TransferKind::Message => {
                 if !last_frame {
                     return Err(TxError::AnonNotSingleFrame);
                 }
 
                 CanMessageId::new(
-                    metadata.priority, metadata.port_id, node_id
+                    transfer_metadata.priority, transfer_metadata.port_id, node_id
                 )
             }
             TransferKind::Request | TransferKind::Response => {
                 let source = node_id.ok_or(TxError::ServiceNoSourceID)?;
-                let destination = metadata.remote_node_id.ok_or(TxError::ServiceNoDestinationID)?;
+                let destination = transfer_metadata.remote_node_id.ok_or(TxError::ServiceNoDestinationID)?;
                 CanServiceId::new(
-                    metadata.priority,
-                    metadata.transfer_kind == TransferKind::Request,
-                    metadata.port_id,
+                    transfer_metadata.priority,
+                    transfer_metadata.transfer_kind == TransferKind::Request,
+                    transfer_metadata.port_id,
                     destination,
                     source,
                 )
             }
         };
 
-        let tail_byte = TailByte::new(first_frame,last_frame, toggle_bit, metadata.transfer_id);
+        // Build tail byte from metadata
+        let tail_byte = TailByte::new(first_frame,last_frame, toggle_bit, transfer_metadata.transfer_id);
 
         let consume_len = core::cmp::min(7, data.len());
         let mut payload = ArrayVec::from_iter(data[0..consume_len].iter().copied());

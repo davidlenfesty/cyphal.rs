@@ -2,6 +2,9 @@
 
 **Please use [Canadensis](https://github.com/samcrow/canadensis) instead.**
 
+This is just a place for me to mess around with API and library design,
+I do not consider it anywhere close to production ready.
+
 # License
 
 Licensed under either of

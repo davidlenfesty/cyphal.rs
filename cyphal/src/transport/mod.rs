@@ -9,29 +9,39 @@
 // Declaring all of the sub transport modules here.
 pub mod can;
 
-use crate::transfer::TransferMetadata;
+use crate::transfer::{TransferMetadata, Frame as TransferFrame};
 use crate::NodeId;
 use crate::{RxError, TxError};
 
 pub trait Transport<C: embedded_time::Clock> {
     type Frame;
 
+    // Metadata stored for both transmission halves
+    type TxMetadata: Default;
+    type RxMetadata: Default;
+
+    // TODO internal frame info before we know about an existing transfer
+
     const MTU_SIZE: usize;
 
     const CRC_SIZE: usize;
 
-    /// Check to see if the index for a receiver frame would be a valid index
-    fn is_valid_next_index(frame_idx: u32, transfer_idx: u32) -> bool;
+    /// Size of payload after appending CRC and any necessary padding bytes
+    fn get_crc_padded_size(requested_size: usize) -> usize;
 
-    /// Process CRC for the selected data.
-    fn update_crc(current_crc: Option<u32>, data: &[u8]) -> u32;
+    /// Update RX metadata for a newly received frame, and check for validity in transfer
+    fn update_rx_metadata(metadata: &mut Self::RxMetadata, frame: &TransferFrame<C>) -> Result<(), RxError>;
+
+    /// Process the entire TX payload CRC, and append CRC with any required padding for this transport
+    fn process_tx_crc(buffer: &mut [u8], data_size: usize) -> usize;
 
     fn rx_process_frame<'a>(
         frame: &'a Self::Frame,
     ) -> Result<crate::transfer::Frame<'a, C>, RxError>;
 
     fn transmit_frame(
-        metadata: &TransferMetadata<C>,
+        transfer_metadata: &TransferMetadata<C>,
+        transport_metadata: &mut Self::TxMetadata,
         data: &[u8],
         node_id: Option<NodeId>,
         timestamp: embedded_time::Instant<C>,

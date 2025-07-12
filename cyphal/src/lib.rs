@@ -72,6 +72,8 @@ pub enum RxError {
     /// Session has expired
     Timeout,
 
+    InvalidFrameOrdering,
+
     /// Transport implementation has incorrectly assigned a remote node id to a message
     MessageWithRemoteId,
 }
@@ -93,7 +95,7 @@ pub enum TxError {
 ///
 /// Transports are supposed to be able to support more than these base 8
 /// priorities, but there is currently no API for that.
-#[derive(FromPrimitive, ToPrimitive, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(FromPrimitive, ToPrimitive, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 pub enum Priority {
     Exceptional,
     Immediate,

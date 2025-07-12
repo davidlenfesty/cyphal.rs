@@ -1,5 +1,7 @@
 //! Transfer management.
 //!
+use core::hash::Hash;
+
 use crate::time::Timestamp;
 use crate::types::*;
 
@@ -13,14 +15,15 @@ pub mod map_manager;
 pub use manager::TransferManager;
 
 /// Protocol-level transfer types.
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum TransferKind {
     Message,
     Response,
     Request,
 }
 
-#[derive(Debug)]
+/// Metadata describing a transfer. This metadata is transport-agnostic.
+#[derive(Debug, Clone)]
 pub struct TransferMetadata<C: embedded_time::Clock> {
     // for tx -> transmission_timeout
     pub timestamp: Timestamp<C>,
@@ -29,10 +32,19 @@ pub struct TransferMetadata<C: embedded_time::Clock> {
     pub port_id: PortId,
     pub remote_node_id: Option<NodeId>,
     pub transfer_id: TransferId,
+}
 
-    // not sure if this is valid yet.
-    pub frame_id: u32,
-    pub crc: u32,
+impl<C: embedded_time::Clock> Hash for TransferMetadata<C> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        // Ignore the timestamp. Ideally we use it but it's not really necessary
+        state.write_u8(self.priority as u8);
+        state.write_u8(self.transfer_kind as u8);
+        if let Some(remote_node_id) = self.remote_node_id {
+            state.write_u16(remote_node_id);
+        }
+        state.write_u16(self.port_id);
+        state.write_u8(self.transfer_id);
+    }
 }
 
 //#[cfg(not(feature = "std"))]
@@ -65,4 +77,7 @@ pub struct Frame<'a, C: embedded_time::Clock> {
     // TODO also CAN needs to carry state inside of an individual transfer...
     pub first_frame: bool,
     pub last_frame: bool,
+
+    // TODO this shouldn't be here
+    pub toggle_bit: bool,
 }

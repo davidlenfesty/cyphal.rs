@@ -1,5 +1,6 @@
 use crate::time::Timestamp;
 use crate::transfer::Frame;
+use crate::transport::Transport;
 
 use embedded_time::fixed_point::FixedPoint;
 
@@ -42,11 +43,6 @@ pub enum InternalOrUserError<I, U> {
     UserError(U),
 }
 
-// what if transfercontext is made to be Transport agnostic?
-// The only transport specific thing I think is the frame index for UDP and the toggle bit for CAN.
-// I can keep track of a frame index in the context/metadata, and convert that to a toggle bit for
-// CAN and use it directly for UDP. Just need to think about how I keep that for RX
-
 /// Trait to declare a session manager. This is responsible for managing ongoing transfers.
 ///
 /// The intent here is to provide an interface to easily define
@@ -54,10 +50,12 @@ pub enum InternalOrUserError<I, U> {
 /// select different models based on e.g. your memory allocation strategy,
 /// or if a model provided by this crate does not suffice, you can implement
 /// your own.
-pub trait TransferManager<C: embedded_time::Clock> {
+pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     // Shouldn't be copy or clone, probably.
     type RxTransferToken;
     type TxTransferToken;
+
+    // TODO now that I am dependent on Transport, I can store transport-specific metadata
 
     /// Attempt to append a new frame onto an existing transfer, optionally returning a transfer token
     /// if it's the final frame of a multi-frame transfer.
@@ -67,8 +65,6 @@ pub trait TransferManager<C: embedded_time::Clock> {
     fn append_frame(
         &mut self,
         frame: &Frame<C>,
-        is_valid_next_idx: fn(u32, u32) -> bool,
-        update_crc: fn(Option<u32>, &[u8]) -> u32,
     ) -> Result<Option<Self::RxTransferToken>, UpdateTransferError>;
 
     /// Create a new transfer from the incoming frame, optionally returning a transfer token if it's a single-frame
@@ -101,17 +97,21 @@ pub trait TransferManager<C: embedded_time::Clock> {
         token: Self::RxTransferToken,
     ) -> Result<(), TokenAccessError>;
 
+
     /// Allocates new space for a TX transfer, providing reference to a buffer to write the payload into
     /// to a user provided callback that either returns an error or the amount of buffer used.
     ///
     /// The implementation may choose to provide a smaller or larger buffer to the user, as serialized DSDL types may take up
     /// less space than their extent, but in that case it is up to the user to handle errors if the buffer is too
     /// small for their purposes. The alternative is to simply return the "out of space" error.
-    fn create_transmission<'a, T>(
+    ///
+    /// The transfer metadata is not always needed, but implementations may use it for uniquely identifying tokens
+    fn create_transmission<'a, E>(
         &'a mut self,
         requested_buffer_size: usize,
-        cb: impl FnOnce(&'a mut [u8]) -> Result<usize, T>,
-    ) -> Result<Self::TxTransferToken, InternalOrUserError<CreateTransferError, T>>;
+        metadata: &TransferMetadata<C>,
+        cb: impl FnOnce(&'a mut [u8]) -> Result<usize, E>,
+    ) -> Result<Self::TxTransferToken, InternalOrUserError<CreateTransferError, E>>;
 
     /// Provides the user access into the transfer payload for the purposes of generating a transport-specific frame and transmitting
     /// it. Returns a new transfer token if the user has not yet consumed the entire payload.
@@ -121,7 +121,7 @@ pub trait TransferManager<C: embedded_time::Clock> {
     fn transmit(
         &mut self,
         token: Self::TxTransferToken,
-        cb: impl FnOnce(&TransferMetadata<C>, &[u8]) -> usize,
+        cb: impl FnOnce(&TransferMetadata<C>, &mut T::TxMetadata, &[u8]) -> usize,
     ) -> Result<Option<Self::TxTransferToken>, TokenAccessError>;
 
     fn cancel_tx_transfer(
