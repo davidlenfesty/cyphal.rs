@@ -9,7 +9,7 @@
 // Declaring all of the sub transport modules here.
 pub mod can;
 
-use crate::transfer::{TransferMetadata, Frame as TransferFrame};
+use crate::transfer::{Frame as TransferFrame, TransferMetadata};
 use crate::NodeId;
 use crate::{RxError, TxError};
 
@@ -30,7 +30,10 @@ pub trait Transport<C: embedded_time::Clock> {
     fn get_crc_padded_size(requested_size: usize) -> usize;
 
     /// Update RX metadata for a newly received frame, and check for validity in transfer
-    fn update_rx_metadata(metadata: &mut Self::RxMetadata, frame: &TransferFrame<C>) -> Result<(), RxError>;
+    fn update_rx_metadata(
+        metadata: &mut Self::RxMetadata,
+        frame: &TransferFrame<C>,
+    ) -> Result<(), RxError>;
 
     /// Process the entire TX payload CRC, and append CRC with any required padding for this transport
     fn process_tx_crc(buffer: &mut [u8], data_size: usize) -> usize;

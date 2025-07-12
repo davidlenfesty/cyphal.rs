@@ -92,11 +92,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
         cb: impl FnOnce(&super::TransferMetadata<C>, &[u8]),
     ) -> Result<(), TokenAccessError>;
 
-    fn cancel_rx_transfer(
-        &mut self,
-        token: Self::RxTransferToken,
-    ) -> Result<(), TokenAccessError>;
-
+    fn cancel_rx_transfer(&mut self, token: Self::RxTransferToken) -> Result<(), TokenAccessError>;
 
     /// Allocates new space for a TX transfer, providing reference to a buffer to write the payload into
     /// to a user provided callback that either returns an error or the amount of buffer used.
@@ -124,10 +120,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
         cb: impl FnOnce(&TransferMetadata<C>, &mut T::TxMetadata, &[u8]) -> usize,
     ) -> Result<Option<Self::TxTransferToken>, TokenAccessError>;
 
-    fn cancel_tx_transfer(
-        &mut self,
-        token: Self::TxTransferToken,
-    ) -> Result<(), TokenAccessError>;
+    fn cancel_tx_transfer(&mut self, token: Self::TxTransferToken) -> Result<(), TokenAccessError>;
 
     // TODO may want to add more hooks for transfer cleanup to allow users to check metadata of published transfers
     // and not just fail blindly

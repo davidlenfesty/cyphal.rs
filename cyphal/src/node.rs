@@ -10,7 +10,7 @@ use core::marker::PhantomData;
 
 use core::clone::Clone;
 
-use crate::transfer::manager::{CreateTransferError, UpdateTransferError, TokenAccessError};
+use crate::transfer::manager::{CreateTransferError, TokenAccessError, UpdateTransferError};
 use crate::transfer::TransferManager;
 use crate::transport::Transport;
 use crate::{types::*, RxError, TransferKind, TxError};
@@ -50,7 +50,10 @@ where
         }
     }
 
-    pub fn try_receive_frame<T: Transport<C>>(self: &mut Self, frame: &T::Frame) -> Result<Option<M::RxTransferToken>, RxError> {
+    pub fn try_receive_frame<T: Transport<C>>(
+        self: &mut Self,
+        frame: &T::Frame,
+    ) -> Result<Option<M::RxTransferToken>, RxError> {
         let frame = T::rx_process_frame(frame)?;
 
         // Check if a message is for us
@@ -78,7 +81,10 @@ where
 
         // TODO check subscriptions
 
-        match self.transfer_manager.append_frame(&frame, T::is_valid_next_index, T::update_crc) {
+        match self
+            .transfer_manager
+            .append_frame(&frame, T::is_valid_next_index, T::update_crc)
+        {
             Ok(tok) => Ok(tok),
             Err(UpdateTransferError::NoSpace) => {
                 // TODO should I handle this error explicitly? yes
@@ -120,7 +126,6 @@ where
         // TODO node should hold a clock instance
         timestamp: embedded_time::Instant<C>,
     ) -> Result<(T::Frame, Option<M::TxTransferToken>), TransmitFrameError> {
-
         let mut frame_out = Err(TransmitFrameError::InvalidHandling);
         let res = M::transmit(&mut self.transfer_manager, token, |metadata, data| {
             let frame = T::transmit_frame(metadata, data, self.id, timestamp);
@@ -157,6 +162,5 @@ where
             }
             Err(e) => Err(TransmitFrameError::TokenError(e)),
         }
-
     }
 }

@@ -11,8 +11,8 @@ use super::{
 };
 
 use core::hash;
-use std::{collections::HashMap, hash::DefaultHasher, hash::Hasher, hash::Hash};
 use std::vec::Vec;
+use std::{collections::HashMap, hash::DefaultHasher, hash::Hash, hash::Hasher};
 
 struct RxTransfer<C: embedded_time::Clock, T: Transport<C>> {
     transfer_metadata: TransferMetadata<C>,
@@ -80,11 +80,14 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
             return Err(CreateTransferError::AlreadyExists);
         }
 
-        self.rx_transfers.insert(token, RxTransfer {
-            transfer_metadata: frame.metadata.clone(),
-            transport_metadata: T::RxMetadata::default(),
-            payload: Vec::from(frame.payload),
-        });
+        self.rx_transfers.insert(
+            token,
+            RxTransfer {
+                transfer_metadata: frame.metadata.clone(),
+                transport_metadata: T::RxMetadata::default(),
+                payload: Vec::from(frame.payload),
+            },
+        );
 
         if frame.last_frame {
             Ok(Some(token))
@@ -105,18 +108,18 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         Ok(())
     }
 
-    fn cancel_rx_transfer(
-            &mut self,
-            token: Self::RxTransferToken,
-        ) -> Result<(), TokenAccessError> {
-        self.rx_transfers.remove(&token).ok_or(TokenAccessError::InvalidToken).map(|_| ())
+    fn cancel_rx_transfer(&mut self, token: Self::RxTransferToken) -> Result<(), TokenAccessError> {
+        self.rx_transfers
+            .remove(&token)
+            .ok_or(TokenAccessError::InvalidToken)
+            .map(|_| ())
     }
 
-    fn cancel_tx_transfer(
-            &mut self,
-            token: Self::TxTransferToken,
-        ) -> Result<(), TokenAccessError> {
-        self.tx_transfers.remove(&token).ok_or(TokenAccessError::InvalidToken).map(|_| ())
+    fn cancel_tx_transfer(&mut self, token: Self::TxTransferToken) -> Result<(), TokenAccessError> {
+        self.tx_transfers
+            .remove(&token)
+            .ok_or(TokenAccessError::InvalidToken)
+            .map(|_| ())
     }
 
     fn create_transmission<'a, E>(
@@ -128,7 +131,9 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         let token = TxToken(hash_metadata(metadata));
 
         if let Some(xfer) = self.tx_transfers.get(token) {
-            return Err(InternalOrUserError::InternalError(CreateTransferError::AlreadyExists));
+            return Err(InternalOrUserError::InternalError(
+                CreateTransferError::AlreadyExists,
+            ));
         }
 
         let final_buf_size = T::get_crc_padded_size(requested_buffer_size);
@@ -141,7 +146,6 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
                 // Don't let the user screw this up for us
                 consumed = std::cmp::min(buf.len(), consumed);
 
-
                 // Process transport CRC + padding and get the actual payload length
                 let real_len = T::process_tx_crc(buf.as_mut_slice(), consumed);
 
@@ -150,12 +154,15 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
                 assert!(real_len <= buf.len(), "Transport CRC deleted data!");
                 buf.resize(real_len, 0u8);
 
-                let _ = self.tx_transfers.insert(token, TxTransfer {
-                    transfer_metadata: metadata.clone(),
-                    transport_metadata: T::TxMetadata::default(),
-                    consumed: 0usize,
-                    payload: buf,
-                });
+                let _ = self.tx_transfers.insert(
+                    token,
+                    TxTransfer {
+                        transfer_metadata: metadata.clone(),
+                        transport_metadata: T::TxMetadata::default(),
+                        consumed: 0usize,
+                        payload: buf,
+                    },
+                );
 
                 Ok(token)
             }
@@ -169,9 +176,16 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         cb: impl FnOnce(&TransferMetadata<C>, &mut T::TxMetadata, &[u8]) -> usize,
     ) -> Result<Option<Self::TxTransferToken>, TokenAccessError> {
         // TODO distinguish timeouts from lack of access, and handle timeouts
-        let transfer = self.tx_transfers.get_mut(&token).ok_or(TokenAccessError::InvalidToken)?;
+        let transfer = self
+            .tx_transfers
+            .get_mut(&token)
+            .ok_or(TokenAccessError::InvalidToken)?;
 
-        let consumed = cb(&transfer.transfer_metadata, &mut transfer.transport_metadata, &mut transfer.payload[transfer.consumed..]);
+        let consumed = cb(
+            &transfer.transfer_metadata,
+            &mut transfer.transport_metadata,
+            &mut transfer.payload[transfer.consumed..],
+        );
         transfer.consumed += consumed;
 
         if transfer.consumed >= transfer.payload.len() {

@@ -11,7 +11,6 @@ use arrayvec::ArrayVec;
 use embedded_hal::can::ExtendedId;
 use num_traits::FromPrimitive;
 
-
 use super::bitfields::*;
 use crate::time::Timestamp;
 use crate::transfer::{Frame, TransferMetadata};
@@ -33,7 +32,7 @@ impl Default for TxMetadata {
             first_frame: false,
             // Protocol version states SOT must have toggle set
             toggle_bit: true,
-        }
+        };
     }
 }
 
@@ -50,16 +49,15 @@ impl Default for RxMetadata {
 
             // Invert initial toggle bit, so when we check the first frame it works if it's set
             toggle_bit: false,
-        }
+        };
     }
 }
 
 impl<C: embedded_time::Clock> Transport<C> for Can {
     type Frame = CanFrame<C>;
 
-    type RxMetadata = RxMetadata; 
+    type RxMetadata = RxMetadata;
     type TxMetadata = TxMetadata;
-
 
     const MTU_SIZE: usize = 8;
     const CRC_SIZE: usize = 2;
@@ -69,7 +67,10 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         return requested_size + 2;
     }
 
-    fn update_rx_metadata(metadata: &mut Self::RxMetadata, frame: &crate::transfer::Frame<C>) -> Result<(), RxError> {
+    fn update_rx_metadata(
+        metadata: &mut Self::RxMetadata,
+        frame: &crate::transfer::Frame<C>,
+    ) -> Result<(), RxError> {
         // Check for issues
         if frame.toggle_bit == metadata.toggle_bit {
             return Err(RxError::InvalidFrameOrdering);
@@ -179,14 +180,13 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         }
     }
 
-
     fn transmit_frame(
-            transfer_metadata: &TransferMetadata<C>,
-            transport_metadata: &mut Self::TxMetadata,
-            data: &[u8],
-            node_id: Option<NodeId>,
-            timestamp: embedded_time::Instant<C>,
-        ) -> Result<(Self::Frame, usize), TxError>  {
+        transfer_metadata: &TransferMetadata<C>,
+        transport_metadata: &mut Self::TxMetadata,
+        data: &[u8],
+        node_id: Option<NodeId>,
+        timestamp: embedded_time::Instant<C>,
+    ) -> Result<(Self::Frame, usize), TxError> {
         // CRC included in data, calculated when creating a TX transfer
         let first_frame = transport_metadata.first_frame;
         let last_frame = data.len() <= 7;
@@ -204,12 +204,16 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                 }
 
                 CanMessageId::new(
-                    transfer_metadata.priority, transfer_metadata.port_id, node_id
+                    transfer_metadata.priority,
+                    transfer_metadata.port_id,
+                    node_id,
                 )
             }
             TransferKind::Request | TransferKind::Response => {
                 let source = node_id.ok_or(TxError::ServiceNoSourceID)?;
-                let destination = transfer_metadata.remote_node_id.ok_or(TxError::ServiceNoDestinationID)?;
+                let destination = transfer_metadata
+                    .remote_node_id
+                    .ok_or(TxError::ServiceNoDestinationID)?;
                 CanServiceId::new(
                     transfer_metadata.priority,
                     transfer_metadata.transfer_kind == TransferKind::Request,
@@ -221,7 +225,12 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         };
 
         // Build tail byte from metadata
-        let tail_byte = TailByte::new(first_frame,last_frame, toggle_bit, transfer_metadata.transfer_id);
+        let tail_byte = TailByte::new(
+            first_frame,
+            last_frame,
+            toggle_bit,
+            transfer_metadata.transfer_id,
+        );
 
         let consume_len = core::cmp::min(7, data.len());
         let mut payload = ArrayVec::from_iter(data[0..consume_len].iter().copied());
@@ -236,7 +245,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                 id: frame_id,
                 payload,
             },
-            consume_len
+            consume_len,
         ))
     }
 }
