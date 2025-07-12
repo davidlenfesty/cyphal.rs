@@ -1,4 +1,4 @@
-use crate::{transport::Transport, types::NodeId};
+use crate::transport::Transport;
 
 use super::{
     Frame, TransferMetadata,
@@ -34,6 +34,15 @@ pub struct MapTransferManager<C: embedded_time::Clock, T: Transport<C>> {
     tx_transfers: HashMap<TxToken, TransferStatus<TxTransfer<C, T>>>,
 }
 
+impl<C: embedded_time::Clock, T: Transport<C>> MapTransferManager<C, T> {
+    pub fn new() -> Self {
+        Self {
+            rx_transfers: HashMap::new(),
+            tx_transfers: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Eq, PartialEq, Hash)]
 pub struct RxToken(u64);
 
@@ -53,14 +62,18 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
     fn append_frame(
         &mut self,
         frame: &Frame<C>,
-        metadata: &T::FrameMetadata,
+        metadata: T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, UpdateTransferError> {
         let token = RxToken(hash_metadata(&frame.metadata));
 
         match self.rx_transfers.get_mut(&token) {
             Some(TransferStatus::TimedOut) => Err(UpdateTransferError::TimedOut),
             Some(TransferStatus::Active(rx_transfer)) => {
-                T::update_rx_metadata(&mut rx_transfer.transport_metadata, metadata, frame);
+                if let Err(e) =
+                    T::update_rx_metadata(&mut rx_transfer.transport_metadata, metadata, frame)
+                {
+                    return Err(UpdateTransferError::RxError(e));
+                }
 
                 rx_transfer.payload.extend_from_slice(frame.payload);
 
@@ -78,8 +91,6 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
-        // TODO maybe not necessary?
-        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError> {
         let token = RxToken(hash_metadata(&frame.metadata));
 
@@ -90,13 +101,15 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         self.rx_transfers.insert(
             token,
             TransferStatus::Active(RxTransfer {
-                transfer_metadata: frame.metadata.clone(),
+                transfer_metadata: frame.metadata,
                 transport_metadata: T::RxMetadata::default(),
                 payload: Vec::from(frame.payload),
             }),
         );
 
         if frame.last_frame {
+            // TODO fix double creation
+            let token = RxToken(hash_metadata(&frame.metadata));
             Ok(Some(token))
         } else {
             Ok(None)
@@ -132,15 +145,15 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
             .map(|_| ())
     }
 
-    fn create_transmission<'a, E>(
-        &'a mut self,
+    fn create_transmission<E>(
+        &mut self,
         requested_buffer_size: usize,
         metadata: &TransferMetadata<C>,
-        cb: impl FnOnce(&'a mut [u8]) -> Result<usize, E>,
+        cb: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Result<Self::TxTransferToken, InternalOrUserError<CreateTransferError, E>> {
         let token = TxToken(hash_metadata(metadata));
 
-        if let Some(xfer) = self.tx_transfers.get(token) {
+        if let Some(_) = self.tx_transfers.get(&token) {
             return Err(InternalOrUserError::InternalError(
                 CreateTransferError::AlreadyExists,
             ));
@@ -148,7 +161,7 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
 
         let final_buf_size = T::get_crc_padded_size(requested_buffer_size);
 
-        let buf = Vec::new();
+        let mut buf = Vec::new();
         buf.resize(final_buf_size, 0u8);
 
         match cb(&mut buf[0..requested_buffer_size]) {
@@ -174,6 +187,8 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
                     }),
                 );
 
+                // TODO fix double creation
+                let token = TxToken(hash_metadata(metadata));
                 Ok(token)
             }
             Err(err) => Err(InternalOrUserError::UserError(err)),

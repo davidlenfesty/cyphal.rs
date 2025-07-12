@@ -5,7 +5,7 @@
 //! are able to do some of the more basic checks that they are valid.
 
 use bitfield::bitfield;
-use embedded_hal::can::ExtendedId;
+use embedded_can::ExtendedId;
 use num_traits::ToPrimitive;
 
 use crate::Priority;

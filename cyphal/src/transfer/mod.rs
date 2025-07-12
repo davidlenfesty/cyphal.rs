@@ -23,7 +23,7 @@ pub enum TransferKind {
 }
 
 /// Metadata describing a transfer. This metadata is transport-agnostic.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TransferMetadata<C: embedded_time::Clock> {
     // for tx -> transmission_timeout
     pub timestamp: Timestamp<C>,
@@ -32,6 +32,15 @@ pub struct TransferMetadata<C: embedded_time::Clock> {
     pub port_id: PortId,
     pub remote_node_id: Option<NodeId>,
     pub transfer_id: TransferId,
+}
+
+// I'm not sure why the manual implementation is required here, but derive(Copy, Clone)
+// silently does nothing
+impl<C: embedded_time::Clock> Copy for TransferMetadata<C> {}
+impl<C: embedded_time::Clock> Clone for TransferMetadata<C> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<C: embedded_time::Clock> Hash for TransferMetadata<C> {

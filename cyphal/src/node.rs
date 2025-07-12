@@ -10,7 +10,7 @@ use crate::transport::Transport;
 use crate::{RxError, TransferKind, TxError, types::*};
 
 /// Node implementation. Generic across session managers and transport types.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Node<M: TransferManager<C, T>, T: Transport<C>, C: embedded_time::Clock> {
     id: Option<NodeId>,
 
@@ -24,6 +24,7 @@ pub struct Node<M: TransferManager<C, T>, T: Transport<C>, C: embedded_time::Clo
     _transport: PhantomData<T>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum TransmitFrameError {
     TokenError(TokenAccessError),
     TxError(TxError),
@@ -78,7 +79,7 @@ where
 
         // TODO check subscriptions
 
-        match self.transfer_manager.append_frame(&frame, &metadata) {
+        match self.transfer_manager.append_frame(&frame, metadata) {
             Ok(tok) => Ok(tok),
             Err(UpdateTransferError::NoSpace) => {
                 // TODO should I handle this error explicitly? yes
@@ -89,7 +90,7 @@ where
                     return Err(RxError::NewSessionNoStart);
                 }
 
-                match self.transfer_manager.new_transfer(&frame, &metadata) {
+                match self.transfer_manager.new_transfer(&frame) {
                     Ok(tok) => Ok(tok),
                     Err(CreateTransferError::AlreadyExists) => {
                         // This is theoretically unreachable

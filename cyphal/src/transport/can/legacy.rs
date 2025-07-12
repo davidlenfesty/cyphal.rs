@@ -5,7 +5,7 @@
 //! follow the conventions here.
 
 use arrayvec::ArrayVec;
-use embedded_hal::can::ExtendedId;
+use embedded_can::ExtendedId;
 use num_traits::FromPrimitive;
 
 use super::bitfields::*;
@@ -216,7 +216,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         // Build CAN ID from transfer metadata
         let frame_id = match transfer_metadata.transfer_kind {
             TransferKind::Message => {
-                if !last_frame {
+                if !last_frame && node_id.is_none() {
                     return Err(TxError::AnonNotSingleFrame);
                 }
 

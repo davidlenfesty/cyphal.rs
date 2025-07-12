@@ -25,7 +25,8 @@ bitfield = "0.13"
 crc-any = { version = "2.5", default-features = false }
 
 # TODO: if new embedded-hal version releases, this can be changed to crates.io
-embedded-hal = {version = "0.2.6", git = "https://github.com/rust-embedded/embedded-hal/", branch = "v0.2.x"}
+embedded-hal = "1.0"
+embedded-can = "0.4"
 embedded-time = "0.12.0"
 streaming-iterator = "0.1.5"
 

@@ -17,6 +17,7 @@ use super::TransferMetadata;
 //    // if not, try check_new_transfer and if true, add new transfer
 //}
 
+#[derive(Debug, Clone, Copy)]
 pub enum UpdateTransferError {
     /// No space left to create a new transfer instance
     NoSpace,
@@ -28,6 +29,7 @@ pub enum UpdateTransferError {
     RxError(RxError),
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum CreateTransferError {
     /// There is no more memory to create the new transfer
     NoSpace,
@@ -35,6 +37,7 @@ pub enum CreateTransferError {
     AlreadyExists,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum TokenAccessError {
     /// Token does not reference an existing transfer
     InvalidToken,
@@ -43,6 +46,7 @@ pub enum TokenAccessError {
     TransferTimeout,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum InternalOrUserError<I, U> {
     InternalError(I),
     UserError(U),
@@ -70,7 +74,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     fn append_frame(
         &mut self,
         frame: &Frame<C>,
-        metadata: &T::FrameMetadata,
+        metadata: T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, UpdateTransferError>;
 
     /// Create a new transfer from the incoming frame, optionally returning a transfer token if it's a single-frame
@@ -85,7 +89,6 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
-        metadata: &T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError>;
 
     /// Provides read access into the transfer payload to the user's calback, consuming the RX token.
@@ -109,11 +112,11 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     /// small for their purposes. The alternative is to simply return the "out of space" error.
     ///
     /// The transfer metadata is not always needed, but implementations may use it for uniquely identifying tokens
-    fn create_transmission<'a, E>(
-        &'a mut self,
+    fn create_transmission<E>(
+        &mut self,
         requested_buffer_size: usize,
         metadata: &TransferMetadata<C>,
-        cb: impl FnOnce(&'a mut [u8]) -> Result<usize, E>,
+        cb: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Result<Self::TxTransferToken, InternalOrUserError<CreateTransferError, E>>;
 
     /// Provides the user access into the transfer payload for the purposes of generating a transport-specific frame and transmitting
