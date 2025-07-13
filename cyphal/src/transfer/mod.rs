@@ -30,7 +30,8 @@ pub struct TransferMetadata<C: embedded_time::Clock> {
     pub priority: Priority,
     pub transfer_kind: TransferKind,
     pub port_id: PortId,
-    pub remote_node_id: Option<NodeId>,
+    pub source_node_id: Option<NodeId>,
+    pub destination_node_id: Option<NodeId>,
     pub transfer_id: TransferId,
 }
 
@@ -48,7 +49,10 @@ impl<C: embedded_time::Clock> Hash for TransferMetadata<C> {
         // Ignore the timestamp. Ideally we use it but it's not really necessary
         state.write_u8(self.priority as u8);
         state.write_u8(self.transfer_kind as u8);
-        if let Some(remote_node_id) = self.remote_node_id {
+        if let Some(source_node_id) = self.source_node_id {
+            state.write_u16(source_node_id);
+        }
+        if let Some(remote_node_id) = self.destination_node_id {
             state.write_u16(remote_node_id);
         }
         state.write_u16(self.port_id);

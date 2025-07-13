@@ -147,7 +147,8 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                         priority: Priority::from_u8(id.priority()).unwrap(),
                         transfer_kind,
                         port_id: id.service_id(),
-                        remote_node_id: Some(id.source_id()),
+                        source_node_id: Some(id.source_id()),
+                        destination_node_id: Some(id.destination_id()),
                         transfer_id: tail_byte.transfer_id(),
                     },
 
@@ -162,16 +163,12 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
             let id = CanMessageId(frame.id.as_raw());
 
             // We can ignore ID in anonymous transfers
-            let source_node_id = if id.is_anon() {
+            if id.is_anon() {
                 // Anonymous transfers can only be single-frame transfers
                 if !(tail_byte.start_of_transfer() && tail_byte.end_of_transfer()) {
                     return Err(RxError::AnonNotSingleFrame);
                 }
-
-                None
-            } else {
-                Some(id.source_id())
-            };
+            }
 
             if !id.valid() {
                 return Err(RxError::InvalidCanId);
@@ -184,7 +181,9 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                         priority: Priority::from_u8(id.priority()).unwrap(),
                         transfer_kind: TransferKind::Message,
                         port_id: id.subject_id(),
-                        remote_node_id: source_node_id,
+                        // This will be a psuedorandom value for anon transfers
+                        source_node_id: Some(id.source_id()),
+                        destination_node_id: None,
                         transfer_id: tail_byte.transfer_id(),
                     },
 
@@ -229,7 +228,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
             TransferKind::Request | TransferKind::Response => {
                 let source = node_id.ok_or(TxError::ServiceNoSourceID)?;
                 let destination = transfer_metadata
-                    .remote_node_id
+                    .destination_node_id
                     .ok_or(TxError::ServiceNoDestinationID)?;
                 CanServiceId::new(
                     transfer_metadata.priority,

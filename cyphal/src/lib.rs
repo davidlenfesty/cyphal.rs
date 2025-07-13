@@ -44,7 +44,7 @@ pub mod transfer;
 pub mod transport;
 pub mod types;
 
-pub use node::Node;
+pub use node::{Node, TransmissionType};
 use time::Duration;
 pub use transfer::TransferKind;
 

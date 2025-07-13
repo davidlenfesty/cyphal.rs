@@ -33,6 +33,13 @@ pub enum TransmitFrameError {
     InvalidHandling,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum TransmissionType {
+    Request(crate::NodeId),
+    Response(crate::NodeId),
+    Broadcast,
+}
+
 impl<'a, M, T, C> Node<M, T, C>
 where
     M: TransferManager<C, T>,
@@ -55,7 +62,7 @@ where
         let (frame, metadata) = T::rx_process_frame(frame)?;
 
         // Check if a message is for us
-        if let Some(node_id) = frame.metadata.remote_node_id {
+        if let Some(node_id) = frame.metadata.destination_node_id {
             match frame.metadata.transfer_kind {
                 TransferKind::Message => {
                     return Err(RxError::MessageWithRemoteId);
@@ -114,11 +121,32 @@ where
     pub fn start_tx_transfer<E>(
         &mut self,
         requested_buffer_size: usize,
-        metadata: &TransferMetadata<C>,
+        timestamp: embedded_time::Instant<C>,
+        priority: crate::Priority,
+        port_id: crate::PortId,
+        tx_kind: TransmissionType,
+        transfer_id: TransferId,
         cb: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Result<M::TxTransferToken, InternalOrUserError<CreateTransferError, E>> {
+        let metadata = TransferMetadata {
+            timestamp: timestamp,
+            priority: priority,
+            transfer_kind: match tx_kind {
+                TransmissionType::Response(_) => TransferKind::Response,
+                TransmissionType::Request(_) => TransferKind::Request,
+                TransmissionType::Broadcast => TransferKind::Message,
+            },
+            port_id: port_id,
+            // TODO make psuedorandom if anon
+            source_node_id: self.id,
+            destination_node_id: match tx_kind {
+                TransmissionType::Response(id) | TransmissionType::Request(id) => Some(id),
+                TransmissionType::Broadcast => None,
+            },
+            transfer_id: transfer_id,
+        };
         self.transfer_manager
-            .create_transmission(requested_buffer_size, metadata, cb)
+            .create_transmission(requested_buffer_size, &metadata, cb)
     }
 
     // TODO users may want a variant of this function that preserves the token
