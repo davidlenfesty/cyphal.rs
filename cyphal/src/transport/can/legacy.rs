@@ -32,7 +32,7 @@ pub struct TxMetadata {
 impl Default for TxMetadata {
     fn default() -> Self {
         return Self {
-            first_frame: false,
+            first_frame: true,
             // Protocol version states SOT must have toggle set
             toggle_bit: true,
         };
@@ -55,6 +55,7 @@ impl Default for RxMetadata {
     }
 }
 
+// TODO we don't actually check RX CRC anywhere and CRC gets included in the transfer payload
 impl<C: embedded_time::Clock> Transport<C> for Can {
     type Frame = CanFrame<C>;
     type FrameMetadata = FrameMetadata;
@@ -87,6 +88,11 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
     }
 
     fn process_tx_crc(buffer: &mut [u8], data_size: usize) -> usize {
+        if data_size <= 7 {
+            // Single frame transfers don't get CRC
+            return data_size;
+        }
+
         let mut crc = CRCu16::crc16ccitt_false();
         crc.digest(&buffer[0..data_size]);
 
