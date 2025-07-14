@@ -20,8 +20,10 @@ use crc_any::CRCu16;
 #[derive(Copy, Clone, Debug)]
 pub struct Can;
 
+#[derive(Clone, Copy, Debug)]
 pub struct FrameMetadata {
     pub toggle_bit: bool,
+    pub crc_val: Option<u16>,
 }
 
 pub struct TxMetadata {
@@ -75,6 +77,11 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         frame_metadata: Self::FrameMetadata,
         frame: &crate::transfer::Frame<C>,
     ) -> Result<(), RxError> {
+        println!(
+            "Previous toggle: {}, incoming toggle: {}",
+            transport_metadata.toggle_bit, frame_metadata.toggle_bit
+        );
+
         // Check for issues
         if frame_metadata.toggle_bit == transport_metadata.toggle_bit {
             return Err(RxError::InvalidFrameOrdering);
@@ -82,7 +89,23 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
 
         // update metadata
         transport_metadata.toggle_bit = frame_metadata.toggle_bit;
-        transport_metadata.crc.digest(frame.payload);
+
+        if !(frame.last_frame && frame.first_frame) {
+            // Only handle CRC if this isn't a single-frame message
+            transport_metadata.crc.digest(frame.payload);
+        }
+
+        if let Some(crc_val) = frame_metadata.crc_val {
+            // Check CRC result for the final frame of a multi-frame transfer
+            if crc_val != transport_metadata.crc.get_crc() {
+                println!(
+                    "CRC failed; expected: 0x{:04x}, calculated: 0x{:04x}",
+                    crc_val,
+                    transport_metadata.crc.get_crc()
+                );
+                return Err(RxError::CrcError);
+            }
+        }
 
         Ok(())
     }
@@ -118,6 +141,22 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         // Pull tail byte from payload
         let tail_byte = TailByte(*frame.payload.last().unwrap());
 
+        let (crc_val, payload_len) =
+            if !tail_byte.start_of_transfer() && tail_byte.end_of_transfer() {
+                // End of multi-frame transfer, parse CRC value but don't include in payload
+                if frame.payload.len() < 3 {
+                    return Err(RxError::InvalidPayload);
+                }
+                let crc = u16::from_be_bytes([
+                    frame.payload[frame.payload.len() - 3],
+                    frame.payload[frame.payload.len() - 2],
+                ]);
+                (Some(crc), frame.payload.len() - 3)
+            } else {
+                // No CRC in single-frame transfers or non-last multi-frame transfers
+                (None, frame.payload.len() - 1)
+            };
+
         // Protocol version states SOT must have toggle set
         if tail_byte.start_of_transfer() && !tail_byte.toggle() {
             return Err(RxError::TransferStartMissingToggle);
@@ -129,6 +168,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
 
         let frame_metadata = FrameMetadata {
             toggle_bit: tail_byte.toggle(),
+            crc_val: crc_val,
         };
 
         if CanServiceId(frame.id.as_raw()).is_svc() {
@@ -158,7 +198,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                         transfer_id: tail_byte.transfer_id(),
                     },
 
-                    payload: &frame.payload[0..frame.payload.len() - 1],
+                    payload: &frame.payload[0..payload_len],
                     first_frame: tail_byte.start_of_transfer(),
                     last_frame: tail_byte.end_of_transfer(),
                 },
@@ -193,7 +233,7 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
                         transfer_id: tail_byte.transfer_id(),
                     },
 
-                    payload: &frame.payload[0..frame.payload.len() - 1],
+                    payload: &frame.payload[0..payload_len],
                     first_frame: tail_byte.start_of_transfer(),
                     last_frame: tail_byte.end_of_transfer(),
                 },

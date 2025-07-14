@@ -86,26 +86,42 @@ where
 
         // TODO check subscriptions
 
+        println!("Port ID: {}", frame.metadata.port_id);
         match self.transfer_manager.append_frame(&frame, metadata) {
-            Ok(tok) => Ok(tok),
+            Ok(tok) => {
+                println!("Frame appended");
+                Ok(tok)
+            }
             Err(UpdateTransferError::NoSpace) => {
                 // TODO should I handle this error explicitly? yes
+                println!("Out of space");
                 Ok(None)
             }
             Err(UpdateTransferError::DoesNotExist) => {
+                println!("Frame not appended?");
                 if !frame.first_frame {
+                    println!("New session no start....");
                     return Err(RxError::NewSessionNoStart);
                 }
 
-                match self.transfer_manager.new_transfer(&frame) {
-                    Ok(tok) => Ok(tok),
+                match self.transfer_manager.new_transfer(&frame, metadata) {
+                    Ok(tok) => {
+                        println!("New transfer made");
+                        Ok(tok)
+                    }
                     Err(CreateTransferError::AlreadyExists) => {
                         // This is theoretically unreachable
                         // TODO handle error
+                        println!("Transferx exists!");
                         Ok(None)
                     }
                     Err(CreateTransferError::NoSpace) => {
                         // TODO handle error
+                        println!("new transfer Out of space");
+                        Ok(None)
+                    }
+                    Err(err) => {
+                        println!("Error: {:?}", err);
                         Ok(None)
                     }
                 }

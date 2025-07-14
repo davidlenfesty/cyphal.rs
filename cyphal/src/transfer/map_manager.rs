@@ -55,6 +55,8 @@ fn hash_metadata<C: embedded_time::Clock>(metadata: &TransferMetadata<C>) -> u64
 #[derive(Eq, PartialEq, Hash)]
 pub struct TxToken(u64);
 
+// TODO abort transfers on error? or just let them timeout
+
 impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTransferManager<C, T> {
     type RxTransferToken = RxToken;
     type TxTransferToken = TxToken;
@@ -69,6 +71,7 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
         match self.rx_transfers.get_mut(&token) {
             Some(TransferStatus::TimedOut) => Err(UpdateTransferError::TimedOut),
             Some(TransferStatus::Active(rx_transfer)) => {
+                println!("Active transfer found");
                 if let Err(e) =
                     T::update_rx_metadata(&mut rx_transfer.transport_metadata, metadata, frame)
                 {
@@ -91,6 +94,7 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
+        metadata: T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError> {
         let token = RxToken(hash_metadata(&frame.metadata));
 
@@ -98,17 +102,21 @@ impl<C: embedded_time::Clock, T: Transport<C>> TransferManager<C, T> for MapTran
             return Err(CreateTransferError::AlreadyExists);
         }
 
+        let mut transport_metadata = T::RxMetadata::default();
+        T::update_rx_metadata(&mut transport_metadata, metadata, &frame)
+            .map_err(|e| CreateTransferError::RxError(e))?;
+
         self.rx_transfers.insert(
             token,
             TransferStatus::Active(RxTransfer {
                 transfer_metadata: frame.metadata,
-                transport_metadata: T::RxMetadata::default(),
+                transport_metadata: transport_metadata,
                 payload: Vec::from(frame.payload),
             }),
         );
 
         if frame.last_frame {
-            // TODO fix double creation
+            // TODO fix double creation of token
             let token = RxToken(hash_metadata(&frame.metadata));
             Ok(Some(token))
         } else {

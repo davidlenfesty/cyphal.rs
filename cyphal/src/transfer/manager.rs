@@ -35,6 +35,7 @@ pub enum CreateTransferError {
     NoSpace,
     /// A transfer with the same metadata already exists
     AlreadyExists,
+    RxError(RxError),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +90,7 @@ pub trait TransferManager<C: embedded_time::Clock, T: Transport<C>> {
     fn new_transfer(
         &mut self,
         frame: &Frame<C>,
+        metadata: T::FrameMetadata,
     ) -> Result<Option<Self::RxTransferToken>, CreateTransferError>;
 
     /// Provides read access into the transfer payload to the user's calback, consuming the RX token.

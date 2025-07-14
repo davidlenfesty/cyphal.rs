@@ -18,7 +18,7 @@ pub trait Transport<C: embedded_time::Clock> {
     type Frame;
 
     /// Metadata produced by an incoming frame needed to match it up with ongoing transfers.
-    type FrameMetadata;
+    type FrameMetadata: Copy;
 
     /// Metadata required to maintain an ongoing TX transfer
     type TxMetadata: Default;

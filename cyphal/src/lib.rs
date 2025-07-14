@@ -73,6 +73,10 @@ pub enum RxError {
 
     InvalidFrameOrdering,
 
+    CrcError,
+
+    InvalidPayload,
+
     /// Transport implementation has incorrectly assigned a remote node id to a message
     MessageWithRemoteId,
 }
