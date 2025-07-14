@@ -122,8 +122,8 @@ impl<C: embedded_time::Clock> Transport<C> for Can {
         // Append CRC
         // TODO endianness may be wrong
         let crc = crc.get_crc();
-        buffer[data_size] = (crc & 0x00FF) as u8;
-        buffer[data_size + 1] = (crc & 0xFF00 >> 8) as u8;
+        buffer[data_size] = ((crc & 0xFF00) >> 8) as u8;
+        buffer[data_size + 1] = (crc & 0x00FF) as u8;
 
         data_size + 2
     }
